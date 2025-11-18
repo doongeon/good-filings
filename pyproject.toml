@@ -1,0 +1,16 @@
+[project]
+name = "mcp-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "docling>=2.61.2",
+    "fastmcp==2.11.0",
+    "llama-cloud-services>=0.6.79",
+    "pandas>=2.0.0",
+    "playwright>=1.48.0",
+    "pypdf>=4.0.0",
+    "python-dotenv>=1.2.1",
+    "requests>=2.31.0",
+]
