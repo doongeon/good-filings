@@ -14,15 +14,21 @@ import pandas as pd
 import json
 import sys
 import io
+import logging
 
+# Disable logging to prevent interference with MCP JSON-RPC communication
+logging.disable(logging.CRITICAL)
 
 # bring in our LLAMA_CLOUD_API_KEY
 from dotenv import load_dotenv
 load_dotenv()
 
 
-# Create a basic server instance
-mcp = FastMCP(name="MyAssistantServer")
+# Create a basic server instance with logging disabled
+mcp = FastMCP(name="good-filings")
+# Suppress FastMCP logging
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
 
 # Create a DocumentConverter instance for docling
 docling_parser = DocumentConverter()
@@ -55,15 +61,6 @@ llama_parser = LlamaParse(
 
 # Ensure robust path resolution in any environment
 PROJECT_ROOT = Path(os.path.abspath(os.path.dirname(__file__)))
-
-# You can also add instructions for how to interact with the server
-mcp_with_instructions = FastMCP(
-    name="HelpfulAssistant",
-    instructions="""
-        This server provides data analysis tools.
-        Call get_average() to analyze numerical data.
-    """,
-)
 
 def split_pdf_into_chunks(pdf_path: Path, pages_per_chunk: int = 80) -> tuple[list[tuple[int, int, Path]], Path]:
     """Split PDF into chunks and return (list of (start_page, end_page, chunk_path) tuples, temp_dir).
@@ -119,57 +116,63 @@ async def read_as_markdown(
         doc = docling_parser.convert(str(source)).document
         result_text = doc.export_to_markdown()
     else:
-        # Default: Use LlamaParse with async aparse method
-        # Check PDF size first
-        reader = PdfReader(str(source))
-        total_pages = len(reader.pages)
-        
-        # For large PDFs, split into chunks and process
-        if total_pages > chunk_size:
-            chunks, temp_dir = split_pdf_into_chunks(source, chunk_size)
-            results = {}
+        # Default: Use LlamaParse with async aparse method, fallback to docling on error
+        try:
+            # Check PDF size first
+            reader = PdfReader(str(source))
+            total_pages = len(reader.pages)
             
-            try:
-                chunk_paths = [str(chunk_path) for _, _, chunk_path in chunks]
+            # For large PDFs, split into chunks and process
+            if total_pages > chunk_size:
+                chunks, temp_dir = split_pdf_into_chunks(source, chunk_size)
+                results = {}
                 
+                try:
+                    chunk_paths = [str(chunk_path) for _, _, chunk_path in chunks]
+                    
+                    # Suppress output to stderr to avoid JSON parsing errors in MCP
+                    old_stderr = sys.stderr
+                    sys.stderr = io.StringIO()
+                    
+                    try:
+                        # Use async batch parsing - LlamaParse handles parallelism internally
+                        job_results = await llama_parser.aparse(chunk_paths)
+                    finally:
+                        sys.stderr = old_stderr
+                    
+                    # Extract markdown from results and store with index
+                    for idx, job_result in enumerate(job_results):
+                        if hasattr(job_result, 'pages'):
+                            markdown = "\n\n".join([page.md for page in job_result.pages])
+                        else:
+                            # Fallback if structure is different
+                            markdown = str(job_result)
+                        results[idx] = markdown
+                    
+                    # Combine results in order
+                    result_text = "".join([
+                        results[idx] for idx in sorted(results.keys())
+                    ])
+                finally:
+                    # Clean up temp directory and all chunk files
+                    if temp_dir.exists():
+                        shutil.rmtree(temp_dir)
+            else:
+                # Process entire PDF at once (for small PDFs)
                 # Suppress output to stderr to avoid JSON parsing errors in MCP
                 old_stderr = sys.stderr
                 sys.stderr = io.StringIO()
                 
                 try:
-                    # Use async batch parsing - LlamaParse handles parallelism internally
-                    job_results = await llama_parser.aparse(chunk_paths)
+                    result = await llama_parser.aparse(str(source))
+                    result_text = "\n\n".join([page.md for page in result.pages])
                 finally:
                     sys.stderr = old_stderr
-                
-                # Extract markdown from results and store with index
-                for idx, job_result in enumerate(job_results):
-                    if hasattr(job_result, 'pages'):
-                        markdown = "\n\n".join([page.md for page in job_result.pages])
-                    else:
-                        # Fallback if structure is different
-                        markdown = str(job_result)
-                    results[idx] = markdown
-                
-                # Combine results in order
-                result_text = "".join([
-                    results[idx] for idx in sorted(results.keys())
-                ])
-            finally:
-                # Clean up temp directory and all chunk files
-                if temp_dir.exists():
-                    shutil.rmtree(temp_dir)
-        else:
-            # Process entire PDF at once (for small PDFs)
-            # Suppress output to stderr to avoid JSON parsing errors in MCP
-            old_stderr = sys.stderr
-            sys.stderr = io.StringIO()
-            
-            try:
-                result = await llama_parser.aparse(str(source))
-                result_text = "\n\n".join([page.md for page in result.pages])
-            finally:
-                sys.stderr = old_stderr
+        except Exception as e:
+            # Fallback to docling if LlamaParse fails
+            print(f"LlamaParse failed: {str(e)}. Falling back to docling.", file=sys.stderr)
+            doc = docling_parser.convert(str(source)).document
+            result_text = doc.export_to_markdown()
     
     # Return success response in JSON format
     return json.dumps({
