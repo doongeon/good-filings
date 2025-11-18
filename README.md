@@ -15,29 +15,14 @@ An MCP (Model Context Protocol) server for processing SEC filings (10-K, 10-Q, 8
 - [Claude Desktop](https://claude.ai/download) (to use this MCP)
 - API Keys:
   - `LLAMA_CLOUD_API_KEY` (from [LlamaIndex](https://cloud.llamaindex.ai/))
-  - `SEC_USER_AGENT` (optional, defaults to Mozilla user agent)
 
 ## Installation
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/doongeon/good-fillings.git
-cd good-fillings
-```
-
-### 2. Install Dependencies
-
-Using uv:
-
-```bash
-uv sync
-```
-
-Or using pip:
-
-```bash
-pip install -e .
+git clone https://github.com/doongeon/good-filings.git
+cd good-filings
 ```
 
 ## Claude Desktop Setup
@@ -66,13 +51,21 @@ pip install -e .
 
 First, get your API key from [LlamaIndex Cloud](https://cloud.llamaindex.ai/).
 
-Add this MCP server to your `claude_desktop_config.json`:
+#### Option A: Using Local Installation (run.sh)
+
+First, install dependencies using uv:
+
+```bash
+uv sync
+```
+
+Then, add this MCP server to your `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "good-fillings": {
-      "command": "/absolute/path/to/good-fillings/run.sh",
+      "command": "/absolute/path/to/good-filings/run.sh",
       "env": {
         "LLAMA_CLOUD_API_KEY": "your-actual-api-key-here"
       }
@@ -83,8 +76,38 @@ Add this MCP server to your `claude_desktop_config.json`:
 
 **Important:**
 
-- Replace `/absolute/path/to/good-fillings/run.sh` with the actual absolute path to your cloned repository's `run.sh` file
+- Replace `/absolute/path/to/good-filings/run.sh` with the actual absolute path to your cloned repository's `run.sh` file
 - Replace `your-actual-api-key-here` with your actual LlamaIndex Cloud API key
+
+#### Option B: Using Docker
+
+1. Build the Docker image:
+
+```bash
+docker build -f Dockerfile -t gf-docker .
+```
+
+2. Add this configuration to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "good-filings": {
+      "transport": "stdio",
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "gf-docker"],
+      "env": {
+        "LLAMA_CLOUD_API_KEY": "your-actual-api-key-here"
+      }
+    }
+  }
+}
+```
+
+**Important:**
+
+- Replace `your-actual-api-key-here` with your actual LlamaIndex Cloud API key
+- Make sure the Docker image `gf-docker` is built and available locally
 
 ### 3. Restart Claude Desktop
 
@@ -101,6 +124,12 @@ Ask Claude naturally:
 ```
 "Can I have a summary of the newest Amazon (CIK: 1018724) 8-K filing?"
 "summary of the newest Amazon (CIK: 1018724) 10-Q filing"
+```
+
+**Note:** If Claude doesn't use the MCP tools, add `use mcp` at the end of your question:
+
+```
+"Can I have a summary of the newest Amazon (CIK: 1018724) 8-K filing? use mcp"
 ```
 
 Claude will automatically:
