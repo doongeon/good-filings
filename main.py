@@ -14,21 +14,19 @@ import pandas as pd
 import json
 import sys
 import io
-import logging
-
-# Disable logging to prevent interference with MCP JSON-RPC communication
-logging.disable(logging.CRITICAL)
 
 # bring in our LLAMA_CLOUD_API_KEY
 from dotenv import load_dotenv
 load_dotenv()
 
 
+# Global cache for large responses
+response_cache = {}
+cache_counter = 0
+
+
 # Create a basic server instance with logging disabled
 mcp = FastMCP(name="good-filings")
-# Suppress FastMCP logging
-for handler in logging.root.handlers[:]:
-    logging.root.removeHandler(handler)
 
 # Create a DocumentConverter instance for docling
 docling_parser = DocumentConverter()
@@ -62,12 +60,12 @@ llama_parser = LlamaParse(
 # Ensure robust path resolution in any environment
 PROJECT_ROOT = Path(os.path.abspath(os.path.dirname(__file__)))
 
-def split_pdf_into_chunks(pdf_path: Path, pages_per_chunk: int = 80) -> tuple[list[tuple[int, int, Path]], Path]:
+def split_pdf_into_chunks(pdf_path: Path, pages_per_chunk: int = 40) -> tuple[list[tuple[int, int, Path]], Path]:
     """Split PDF into chunks and return (list of (start_page, end_page, chunk_path) tuples, temp_dir).
     
     Args:
         pdf_path: Path to the PDF file
-        pages_per_chunk: Number of pages per chunk (default: 80, max: 80)
+        pages_per_chunk: Number of pages per chunk (default: 40, max: 40)
     """
     # Ensure pages_per_chunk doesn't exceed maximum
     pages_per_chunk = min(pages_per_chunk, 40)
@@ -110,75 +108,130 @@ async def read_as_markdown(
     if not source.exists():
         raise FileNotFoundError(f"File not found: {input_file_path}. Please check the file path.")
     
-    # Parse based on engine
-    if engine == "docling":
-        # Use docling for local parsing (synchronous)
-        doc = docling_parser.convert(str(source)).document
-        result_text = doc.export_to_markdown()
-    else:
-        # Default: Use LlamaParse with async aparse method, fallback to docling on error
-        try:
-            # Check PDF size first
-            reader = PdfReader(str(source))
-            total_pages = len(reader.pages)
-            
-            # For large PDFs, split into chunks and process
-            if total_pages > chunk_size:
-                chunks, temp_dir = split_pdf_into_chunks(source, chunk_size)
-                results = {}
-                
-                try:
-                    chunk_paths = [str(chunk_path) for _, _, chunk_path in chunks]
-                    
-                    # Suppress output to stderr to avoid JSON parsing errors in MCP
-                    old_stderr = sys.stderr
-                    sys.stderr = io.StringIO()
-                    
-                    try:
-                        # Use async batch parsing - LlamaParse handles parallelism internally
-                        job_results = await llama_parser.aparse(chunk_paths)
-                    finally:
-                        sys.stderr = old_stderr
-                    
-                    # Extract markdown from results and store with index
-                    for idx, job_result in enumerate(job_results):
-                        if hasattr(job_result, 'pages'):
-                            markdown = "\n\n".join([page.md for page in job_result.pages])
-                        else:
-                            # Fallback if structure is different
-                            markdown = str(job_result)
-                        results[idx] = markdown
-                    
-                    # Combine results in order
-                    result_text = "".join([
-                        results[idx] for idx in sorted(results.keys())
-                    ])
-                finally:
-                    # Clean up temp directory and all chunk files
-                    if temp_dir.exists():
-                        shutil.rmtree(temp_dir)
-            else:
-                # Process entire PDF at once (for small PDFs)
-                # Suppress output to stderr to avoid JSON parsing errors in MCP
-                old_stderr = sys.stderr
-                sys.stderr = io.StringIO()
-                
-                try:
-                    result = await llama_parser.aparse(str(source))
-                    result_text = "\n\n".join([page.md for page in result.pages])
-                finally:
-                    sys.stderr = old_stderr
-        except Exception as e:
-            # Fallback to docling if LlamaParse fails
-            print(f"LlamaParse failed: {str(e)}. Falling back to docling.", file=sys.stderr)
+    # Suppress stdout/stderr to avoid JSON parsing errors in MCP
+    # External libraries (docling, pypdf, llama-cloud) may print to stdout/stderr
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    sys.stdout = io.StringIO()
+    sys.stderr = io.StringIO()
+    
+    try:
+        # Parse based on engine
+        if engine == "docling":
+            # Use docling for local parsing (synchronous)
             doc = docling_parser.convert(str(source)).document
             result_text = doc.export_to_markdown()
+        else:
+            # Default: Use LlamaParse with async aparse method, fallback to docling on error
+            try:
+                # Check PDF size first
+                reader = PdfReader(str(source))
+                total_pages = len(reader.pages)
+                
+                # For large PDFs, split into chunks and process
+                if total_pages > chunk_size:
+                    chunks, temp_dir = split_pdf_into_chunks(source, chunk_size)
+                    results = {}
+                    
+                    try:
+                        chunk_paths = [str(chunk_path) for _, _, chunk_path in chunks]
+                        
+                        # Use async batch parsing - LlamaParse handles parallelism internally
+                        job_results = await llama_parser.aparse(chunk_paths)
+                        
+                        # Extract markdown from results and store with index
+                        for idx, job_result in enumerate(job_results):
+                            if hasattr(job_result, 'pages'):
+                                markdown = "\n\n".join([page.md for page in job_result.pages])
+                            else:
+                                # Fallback if structure is different
+                                markdown = str(job_result)
+                            results[idx] = markdown
+                        
+                        # Combine results in order
+                        result_text = "".join([
+                            results[idx] for idx in sorted(results.keys())
+                        ])
+                    finally:
+                        # Clean up temp directory and all chunk files
+                        if temp_dir.exists():
+                            shutil.rmtree(temp_dir)
+                else:
+                    # Process entire PDF at once (for small PDFs)
+                    result = await llama_parser.aparse(str(source))
+                    result_text = "\n\n".join([page.md for page in result.pages])
+            except Exception as e:
+                # Fallback to docling if LlamaParse fails
+                doc = docling_parser.convert(str(source)).document
+                result_text = doc.export_to_markdown()
+    finally:
+        # Restore stdout/stderr
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
     
-    # Return success response in JSON format
+    # Store in cache to handle large responses
+    global cache_counter, response_cache
+    cache_id = f"markdown_{cache_counter}"
+    response_cache[cache_id] = result_text
+    cache_counter += 1
+    
+    # Return cache reference with metadata
     return json.dumps({
-        "markdown_content": result_text
+        "status": "success",
+        "cache_id": cache_id,
+        "total_chars": len(result_text),
+        "total_kb": round(len(result_text) / 1024, 2),
+        "message": f"Markdown content cached. Use 'get_markdown_segment' tool to retrieve content in chunks. Total size: {round(len(result_text) / 1024, 2)} KB"
     })
 
+
+
+@mcp.tool
+async def get_markdown_segment(cache_id: str, offset: int = 0) -> str:
+    """Retrieve a segment of cached markdown content.
+    
+    Args:
+        cache_id: The cache ID returned from read_as_markdown
+        offset: Starting character position (default: 0)
+    
+    Returns:
+        A JSON response with the requested segment and metadata (100KB chunks)
+    """
+    # Fixed chunk size
+    length = 100000
+    
+    # Validate cache_id
+    if cache_id not in response_cache:
+        return json.dumps({
+            "error": f"Cache not found: {cache_id}",
+            "available_caches": list(response_cache.keys())
+        })
+    
+    content = response_cache[cache_id]
+    total_length = len(content)
+    
+    # Validate offset
+    if offset >= total_length:
+        return json.dumps({
+            "error": f"Offset {offset} is beyond content length {total_length}"
+        })
+    
+    # Extract segment
+    segment = content[offset:offset + length]
+    has_more = offset + length < total_length
+    next_offset = offset + length if has_more else None
+    
+    return json.dumps({
+        "status": "success",
+        "cache_id": cache_id,
+        "segment": segment,
+        "offset": offset,
+        "length": len(segment),
+        "total_length": total_length,
+        "has_more": has_more,
+        "next_offset": next_offset,
+        "progress": f"{min(offset + length, total_length)}/{total_length} characters"
+    })
 
 
 @mcp.tool
@@ -341,6 +394,6 @@ def download_sec_filing(
 if __name__ == "__main__":
     # This runs the server, defaulting to STDIO transport
     mcp.run()
-    
+
     # To use a different transport, e.g., HTTP:
     # mcp.run(transport="http", host="127.0.0.1", port=9000)
