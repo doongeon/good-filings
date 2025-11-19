@@ -18,7 +18,7 @@ An MCP (Model Context Protocol) server for processing SEC filings (10-K, 10-Q, 8
 - [Claude Desktop](https://claude.ai/download) (to use this MCP)
 - Make sure `uv` is installed and available in your system `PATH`. Claude Desktop runs MCP servers in an isolated environment and relies on `uv` to manage dependencies.
 - API Keys (optional):
-  - `LLAMA_CLOUD_API_KEY` (from [LlamaIndex](https://cloud.llamaindex.ai/)) - Required only if using `llama-cloud` engine. Default is `llama-cloud`, but can use `docling` without API key.
+  - `LLAMA_CLOUD_API_KEY` (from [LlamaIndex](https://developers.llamaindex.ai/typescript/cloud/general/api_key/)) - Required only if using `llama-cloud` engine. Default is `llama-cloud`, but can use `docling` without API key.
 
 ## Installation
 
@@ -167,10 +167,10 @@ Ask Claude naturally:
 "Can I have a summary of the latest Amazon (CIK: 1018724) 8-K filing? use mcp"
 ```
 
-**Note 2:** If Claude stops mid-response because it hit the maximum length, just reply with `keep go` to have it continue.
+**Note 2:** If Claude stops mid-response because it hit the maximum length, just reply with `keep go on` to have it continue.
 
 ```
-"keep go"
+"keep go on"
 ```
 
 Claude will automatically:
