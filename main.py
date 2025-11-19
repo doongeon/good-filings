@@ -31,31 +31,50 @@ mcp = FastMCP(name="good-filings")
 # Create a DocumentConverter instance for docling
 docling_parser = DocumentConverter()
 
-# Create LlamaParse instance for default parsing
-llama_parser = LlamaParse(
-    api_key=os.environ.get("LLAMA_CLOUD_API_KEY"),
+def _create_llama_parser() -> tuple[Union[LlamaParse, None], Union[str, None]]:
+    """
+    Initialize LlamaParse only when a valid API key is supplied.
     
-    # --- Output Format ---
-    result_type="markdown",
+    Returns:
+        (parser_instance | None, error_message | None)
+    """
+    api_key = (os.environ.get("LLAMA_CLOUD_API_KEY") or "").strip()
+    if not api_key:
+        return None, "LLAMA_CLOUD_API_KEY not set or empty; falling back to docling."
+    
+    try:
+        parser = LlamaParse(
+            api_key=api_key,
+            
+            # --- Output Format ---
+            result_type="markdown",
 
-    # --- OCR / Language ---
-    language="en",                   # Primary language for OCR (if used)
-    disable_ocr=True,                # Disable OCR to improve speed (SEC PDFs are text-based)
+            # --- OCR / Language ---
+            language="en",                   # Primary language for OCR (if used)
+            disable_ocr=True,                # Disable OCR to improve speed (SEC PDFs are text-based)
 
-    # --- Layout Handling ---
-    hide_headers=True,               # Remove repeating page headers (cleaner output)
-    hide_footers=True,               # Remove repeating footers/page numbers
-    skip_diagonal_text=True,         # Ignore diagonal watermark text if present
-    do_not_unroll_columns=False,     # Keep automatic column unrolling ON for multi-column reports
+            # --- Layout Handling ---
+            hide_headers=True,               # Remove repeating page headers (cleaner output)
+            hide_footers=True,               # Remove repeating footers/page numbers
+            skip_diagonal_text=True,         # Ignore diagonal watermark text if present
+            do_not_unroll_columns=False,     # Keep automatic column unrolling ON for multi-column reports
 
-    # --- Table Handling (Important for 10-K financials) ---
-    merge_tables_across_pages_in_markdown=True,  # Combine multi-page financial tables
-    preserve_layout_alignment_across_pages=True, # Keep column alignment across pages
+            # --- Table Handling (Important for 10-K financials) ---
+            merge_tables_across_pages_in_markdown=True,  # Combine multi-page financial tables
+            preserve_layout_alignment_across_pages=True, # Keep column alignment across pages
 
-    # --- Performance Tweaks ---
-    num_workers=8,                   # Increase parallelism for faster parsing
-    split_by_page=True,              # Process pages independently (SEC docs = many pages → improves speed)
-)
+            # --- Performance Tweaks ---
+            num_workers=8,                   # Increase parallelism for faster parsing
+            split_by_page=True,              # Process pages independently (SEC docs = many pages → improves speed)
+        )
+        return parser, None
+    except Exception as exc:
+        warning = f"Failed to initialize LlamaParse; {exc}. Using docling instead."
+        print(f"[good-filings] warning: {warning}", file=sys.stderr)
+        return None, warning
+
+
+llama_parser, llama_parser_error = _create_llama_parser()
 
 # Ensure robust path resolution in any environment
 PROJECT_ROOT = Path(os.path.abspath(os.path.dirname(__file__)))
@@ -108,9 +127,9 @@ async def read_as_markdown(
     requested_engine = engine
     fallback_reason = None
     
-    if engine == "llama-cloud" and not os.environ.get("LLAMA_CLOUD_API_KEY"):
+    if engine == "llama-cloud" and llama_parser is None:
         engine = "docling"
-        fallback_reason = "LLAMA_CLOUD_API_KEY not set; using docling instead."
+        fallback_reason = llama_parser_error or "LLAMA_CLOUD_API_KEY not set; using docling instead."
     
     # Check if file exists
     if not source.exists():
@@ -132,48 +151,52 @@ async def read_as_markdown(
         if engine == "docling":
             result_text = parse_with_docling()
         else:
-            # Default: Use LlamaParse with async aparse method, fallback to docling on error
-            try:
-                # Check PDF size first
-                reader = PdfReader(str(source))
-                total_pages = len(reader.pages)
-                
-                # For large PDFs, split into chunks and process
-                if total_pages > chunk_size:
-                    chunks, temp_dir = split_pdf_into_chunks(source, chunk_size)
-                    results = {}
-                    
-                    try:
-                        chunk_paths = [str(chunk_path) for _, _, chunk_path in chunks]
-                        
-                        # Use async batch parsing - LlamaParse handles parallelism internally
-                        job_results = await llama_parser.aparse(chunk_paths)
-                        
-                        # Extract markdown from results and store with index
-                        for idx, job_result in enumerate(job_results):
-                            if hasattr(job_result, 'pages'):
-                                markdown = "\n\n".join([page.md for page in job_result.pages])
-                            else:
-                                # Fallback if structure is different
-                                markdown = str(job_result)
-                            results[idx] = markdown
-                        
-                        # Combine results in order
-                        result_text = "".join([
-                            results[idx] for idx in sorted(results.keys())
-                        ])
-                    finally:
-                        # Clean up temp directory and all chunk files
-                        if temp_dir.exists():
-                            shutil.rmtree(temp_dir)
-                else:
-                    # Process entire PDF at once (for small PDFs)
-                    result = await llama_parser.aparse(str(source))
-                    result_text = "\n\n".join([page.md for page in result.pages])
-            except Exception as e:
-                # Fallback to docling if LlamaParse fails
-                fallback_reason = f"LlamaParse failed ({str(e)}); using docling instead."
+            if llama_parser is None:
+                fallback_reason = "LLAMA_CLOUD_API_KEY not set; using docling instead."
                 result_text = parse_with_docling()
+            else:
+                # Default: Use LlamaParse with async aparse method, fallback to docling on error
+                try:
+                    # Check PDF size first
+                    reader = PdfReader(str(source))
+                    total_pages = len(reader.pages)
+                    
+                    # For large PDFs, split into chunks and process
+                    if total_pages > chunk_size:
+                        chunks, temp_dir = split_pdf_into_chunks(source, chunk_size)
+                        results = {}
+                        
+                        try:
+                            chunk_paths = [str(chunk_path) for _, _, chunk_path in chunks]
+                            
+                            # Use async batch parsing - LlamaParse handles parallelism internally
+                            job_results = await llama_parser.aparse(chunk_paths)
+                            
+                            # Extract markdown from results and store with index
+                            for idx, job_result in enumerate(job_results):
+                                if hasattr(job_result, 'pages'):
+                                    markdown = "\n\n".join([page.md for page in job_result.pages])
+                                else:
+                                    # Fallback if structure is different
+                                    markdown = str(job_result)
+                                results[idx] = markdown
+                            
+                            # Combine results in order
+                            result_text = "".join([
+                                results[idx] for idx in sorted(results.keys())
+                            ])
+                        finally:
+                            # Clean up temp directory and all chunk files
+                            if temp_dir.exists():
+                                shutil.rmtree(temp_dir)
+                    else:
+                        # Process entire PDF at once (for small PDFs)
+                        result = await llama_parser.aparse(str(source))
+                        result_text = "\n\n".join([page.md for page in result.pages])
+                except Exception as e:
+                    # Fallback to docling if LlamaParse fails
+                    fallback_reason = f"LlamaParse failed ({str(e)}); using docling instead."
+                    result_text = parse_with_docling()
     finally:
         # Restore stdout/stderr
         sys.stdout = old_stdout
