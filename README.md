@@ -33,6 +33,8 @@ cd good-filings
 
 ### 1. Find Claude Desktop Config Location
 
+For detailed instructions on how to locate the Claude Desktop configuration file, see the [official MCP documentation](https://modelcontextprotocol.io/docs/develop/build-server#testing-your-server-with-claude-for-desktop).
+
 **macOS:**
 
 ```bash
