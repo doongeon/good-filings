@@ -85,6 +85,18 @@ Then, add this MCP server to your `claude_desktop_config.json`:
 - Replace `/absolute/path/to/good-filings/run.sh` with the actual absolute path to your cloned repository's `run.sh` file
 - Replace `your-actual-api-key-here` with your actual LlamaIndex Cloud API key
 
+If you don’t have a Llama Cloud API key and only plan to use the Docling engine, you can omit the `env` block entirely:
+
+```json
+{
+  "mcpServers": {
+    "good-filings": {
+      "command": "/absolute/path/to/good-filings/run.sh"
+    }
+  }
+}
+```
+
 #### Option B: Using Docker
 
 1. Build the Docker image:
@@ -114,6 +126,20 @@ docker build -f Dockerfile -t gf-docker .
 
 - Replace `your-actual-api-key-here` with your actual LlamaIndex Cloud API key
 - Make sure the Docker image `gf-docker` is built and available locally
+
+Without a Llama Cloud API key you can still run the Docker image (Docling-only) by removing the `env` section:
+
+```json
+{
+  "mcpServers": {
+    "good-filings": {
+      "transport": "stdio",
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "gf-docker"]
+    }
+  }
+}
+```
 
 ### 3. Restart Claude Desktop
 
