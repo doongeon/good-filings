@@ -5,7 +5,10 @@ An MCP (Model Context Protocol) server for processing SEC filings (10-K, 10-Q, 8
 ## Features
 
 - **Download SEC Filings**: Download various SEC filing documents (10-K, 10-Q, 8-K, DEF 14A)
-- **PDF to Markdown**: Convert PDF documents to markdown format using LlamaParse or Docling
+- **PDF to Markdown**: Convert PDF documents to markdown format using LlamaParse (default) or Docling
+  - Automatically handles large files by splitting into chunks
+  - Falls back to Docling if LlamaParse fails
+  - Large responses (>100KB) are cached and retrieved in 100KB segments
 - **HTML to PDF**: Convert HTML files to PDF using Playwright
 
 ## Prerequisites
@@ -13,8 +16,8 @@ An MCP (Model Context Protocol) server for processing SEC filings (10-K, 10-Q, 8
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv) (Python package manager)
 - [Claude Desktop](https://claude.ai/download) (to use this MCP)
-- API Keys:
-  - `LLAMA_CLOUD_API_KEY` (from [LlamaIndex](https://cloud.llamaindex.ai/))
+- API Keys (optional):
+  - `LLAMA_CLOUD_API_KEY` (from [LlamaIndex](https://cloud.llamaindex.ai/)) - Required only if using `llama-cloud` engine. Default is `llama-cloud`, but can use `docling` without API key.
 
 ## Installation
 
@@ -122,8 +125,9 @@ Once configured, Claude will automatically use the available tools based on your
 Ask Claude naturally:
 
 ```
-"Can I have a summary of the newest Amazon (CIK: 1018724) 8-K filing?"
-"summary of the newest Amazon (CIK: 1018724) 10-Q filing"
+"Can I have a summary of the latest Amazon (CIK: 1018724) 8-K filing?"
+"summary of the latest Amazon (CIK: 1018724) 10-Q filing"
+"show me a markdown of the latest Amazon (cik: 1018724) 10-k filing"
 ```
 
 **Note:** If Claude doesn't use the MCP tools, add `use mcp` at the end of your question:
@@ -135,5 +139,8 @@ Ask Claude naturally:
 Claude will automatically:
 
 1. Download the requested SEC filing
-2. Convert it to markdown format
-3. Provide a summary or return the content
+2. Convert it to markdown format (default: llama-cloud, can use docling by specifying `engine="docling"`)
+3. For large files (>100KB), content is cached and retrieved in 100KB segments
+4. Provide a summary or return the content
+
+**Note about large files:** When processing very large PDFs, the markdown content is cached and Claude will automatically retrieve it in chunks using the `get_markdown_segment` tool. This prevents MCP response size limits.
