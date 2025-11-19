@@ -93,16 +93,24 @@ def split_pdf_into_chunks(pdf_path: Path, pages_per_chunk: int = 40) -> tuple[li
 @mcp.tool
 async def read_as_markdown(
     input_file_path: str, 
-    engine: str = "llama-cloud"
+    engine: str = "llama-cloud",
+    direct_response: bool = False,
 ) -> str:
     """Read a PDF file and convert it to markdown format.
     
     Args:
         input_file_path: Path to the PDF file relative to the project root (e.g., "pdf/file.pdf")
         engine: Parsing engine to use. "llama-cloud" (default) uses LlamaParse, "docling" uses local docling converter
+        direct_response: If True, return markdown content directly (testing only). Otherwise, store in cache.
     """
     source = PROJECT_ROOT / input_file_path
     chunk_size = 40  # Fixed chunk size for large PDF splitting
+    requested_engine = engine
+    fallback_reason = None
+    
+    if engine == "llama-cloud" and not os.environ.get("LLAMA_CLOUD_API_KEY"):
+        engine = "docling"
+        fallback_reason = "LLAMA_CLOUD_API_KEY not set; using docling instead."
     
     # Check if file exists
     if not source.exists():
@@ -117,10 +125,12 @@ async def read_as_markdown(
     
     try:
         # Parse based on engine
-        if engine == "docling":
-            # Use docling for local parsing (synchronous)
+        def parse_with_docling():
             doc = docling_parser.convert(str(source)).document
-            result_text = doc.export_to_markdown()
+            return doc.export_to_markdown()
+        
+        if engine == "docling":
+            result_text = parse_with_docling()
         else:
             # Default: Use LlamaParse with async aparse method, fallback to docling on error
             try:
@@ -162,32 +172,49 @@ async def read_as_markdown(
                     result_text = "\n\n".join([page.md for page in result.pages])
             except Exception as e:
                 # Fallback to docling if LlamaParse fails
-                doc = docling_parser.convert(str(source)).document
-                result_text = doc.export_to_markdown()
+                fallback_reason = f"LlamaParse failed ({str(e)}); using docling instead."
+                result_text = parse_with_docling()
     finally:
         # Restore stdout/stderr
         sys.stdout = old_stdout
         sys.stderr = old_stderr
     
-    # Store in cache to handle large responses
-    global cache_counter, response_cache
-    cache_id = f"markdown_{cache_counter}"
-    response_cache[cache_id] = result_text
-    cache_counter += 1
-    
-    # Return cache reference with metadata
-    return json.dumps({
-        "status": "success",
-        "cache_id": cache_id,
-        "total_chars": len(result_text),
-        "total_kb": round(len(result_text) / 1024, 2),
-        "message": f"Markdown content cached. Use 'get_markdown_segment' tool to retrieve content in chunks. Total size: {round(len(result_text) / 1024, 2)} KB"
-    })
+    if direct_response:
+        # Testing mode: return markdown content directly (may exceed MCP limits)
+        return json.dumps({
+            "status": "success",
+            "mode": "direct",
+            "engine_requested": requested_engine,
+            "engine_used": engine,
+            "markdown_content": result_text,
+            "total_chars": len(result_text),
+            "total_kb": round(len(result_text) / 1024, 2),
+            "fallback_reason": fallback_reason,
+            "message": "Direct markdown content response. Use sparingly for testing due to size limits."
+        })
+    else:
+        # Default mode: store in cache and return metadata
+        global cache_counter, response_cache
+        cache_id = f"markdown_{cache_counter}"
+        response_cache[cache_id] = result_text
+        cache_counter += 1
+        
+        return json.dumps({
+            "status": "success",
+            "mode": "cached",
+            "cache_id": cache_id,
+            "engine_requested": requested_engine,
+            "engine_used": engine,
+            "total_chars": len(result_text),
+            "total_kb": round(len(result_text) / 1024, 2),
+            "fallback_reason": fallback_reason,
+            "message": f"Markdown content cached. Use 'get_markdown_segment' tool to retrieve content in chunks. Total size: {round(len(result_text) / 1024, 2)} KB"
+        })
 
 
 
 @mcp.tool
-async def get_markdown_segment(cache_id: str, offset: int = 0) -> str:
+def get_markdown_segment(cache_id: str, offset: int = 0) -> str:
     """Retrieve a segment of cached markdown content.
     
     Args:
