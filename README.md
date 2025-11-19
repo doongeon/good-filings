@@ -159,10 +159,16 @@ Ask Claude naturally:
 "show me a markdown of the latest Amazon (cik: 1018724) 10-k filing"
 ```
 
-**Note:** If Claude doesn't use the MCP tools, add `use mcp` at the end of your question:
+**Note 1:** If Claude doesn't use the MCP tools, add `use mcp` at the end of your question.
 
 ```
 "Can I have a summary of the latest Amazon (CIK: 1018724) 8-K filing? use mcp"
+```
+
+**Note 2:** If Claude stops mid-response because it hit the maximum length, just reply with `keep go` to have it continue.
+
+```
+"keep go"
 ```
 
 Claude will automatically:
