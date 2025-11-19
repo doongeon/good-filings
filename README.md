@@ -1,6 +1,6 @@
-# good-fillings
+# good-filings
 
-An MCP (Model Context Protocol) server for processing SEC filings (10-K, 10-Q, 8-K, DEF 14A). This server provides tools to download SEC documents, convert them to markdown, and convert HTML to PDF.
+An MCP (Model Context Protocol) server for processing SEC filings (10-K, 10-Q, 8-K, DEF 14A). This server provides tools to download SEC documents, convert them to markdown, and convert HTML to PDF. It is fully compatible with Claude Desktop and can be used as a local MCP server.
 
 ## Features
 
@@ -68,7 +68,7 @@ Then, add this MCP server to your `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "good-fillings": {
+    "good-filings": {
       "command": "/absolute/path/to/good-filings/run.sh",
       "env": {
         "LLAMA_CLOUD_API_KEY": "your-actual-api-key-here"
@@ -78,7 +78,7 @@ Then, add this MCP server to your `claude_desktop_config.json`:
 }
 ```
 
-> **Warn:** `uv` must be installed and available in your system `PATH`. Claude Desktop runs MCP servers within its own isolated environment and relies on `uv` to manage dependencies, so ensure that `uv` is accessible from the command line before proceeding.
+> **Warning:** `uv` must be installed and available in your system `PATH`. Claude Desktop runs MCP servers within its own isolated environment and relies on `uv` to manage dependencies, so ensure that `uv` is accessible from the command line before proceeding.
 
 **Important:**
 
@@ -136,7 +136,7 @@ Ask Claude naturally:
 **Note:** If Claude doesn't use the MCP tools, add `use mcp` at the end of your question:
 
 ```
-"Can I have a summary of the newest Amazon (CIK: 1018724) 8-K filing? use mcp"
+"Can I have a summary of the latest Amazon (CIK: 1018724) 8-K filing? use mcp"
 ```
 
 Claude will automatically:
@@ -194,5 +194,3 @@ Claude will automatically:
 - **Behavior**:
   - Uses SEC EDGAR endpoints with rate limiting
   - Saves primary documents locally for subsequent conversion
-
-> **Tip**: Typically, you’ll call `download_sec_filing` first to get the PDF/HTML, then `read_as_markdown` to convert, and optionally `get_markdown_segment` if the content is large.

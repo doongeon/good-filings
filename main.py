@@ -338,7 +338,7 @@ def download_sec_filing(
 
         # 2. Fetch submissions JSON from SEC
         submissions_url = f"https://data.sec.gov/submissions/CIK{cik_padded}.json"
-        user_agent = os.getenv("SEC_USER_AGENT", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+        user_agent = os.getenv("SEC_USER_AGENT", "good-filings-mcp/1.0 (Donggeon Na; ndmb2012@gmail.com)")
         headers = {
             "User-Agent": user_agent,
             "Accept-Encoding": "gzip, deflate",
