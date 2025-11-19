@@ -16,6 +16,7 @@ An MCP (Model Context Protocol) server for processing SEC filings (10-K, 10-Q, 8
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv) (Python package manager)
 - [Claude Desktop](https://claude.ai/download) (to use this MCP)
+- Make sure `uv` is installed and available in your system `PATH`. Claude Desktop runs MCP servers in an isolated environment and relies on `uv` to manage dependencies.
 - API Keys (optional):
   - `LLAMA_CLOUD_API_KEY` (from [LlamaIndex](https://cloud.llamaindex.ai/)) - Required only if using `llama-cloud` engine. Default is `llama-cloud`, but can use `docling` without API key.
 
@@ -52,9 +53,9 @@ cd good-filings
 
 ### 2. Update Claude Desktop Configuration
 
-First, get your API key from [LlamaIndex Cloud](https://cloud.llamaindex.ai/).
+First, get your API key from [LlamaIndex Cloud](https://developers.llamaindex.ai/typescript/cloud/general/api_key/).
 
-#### Option A: Using Local Installation (run.sh)
+#### Option A: Using Local Installation
 
 First, install dependencies using uv:
 
@@ -76,6 +77,8 @@ Then, add this MCP server to your `claude_desktop_config.json`:
   }
 }
 ```
+
+> **Warn:** `uv` must be installed and available in your system `PATH`. Claude Desktop runs MCP servers within its own isolated environment and relies on `uv` to manage dependencies, so ensure that `uv` is accessible from the command line before proceeding.
 
 **Important:**
 
@@ -144,3 +147,52 @@ Claude will automatically:
 4. Provide a summary or return the content
 
 **Note about large files:** When processing very large PDFs, the markdown content is cached and Claude will automatically retrieve it in chunks using the `get_markdown_segment` tool. This prevents MCP response size limits.
+
+## Available MCP Tools
+
+### `read_as_markdown`
+
+- **Purpose**: Convert a PDF (located within the repo) into markdown text.
+- **Parameters**:
+  - `input_file_path`: Relative path to the PDF (e.g., `pdf/sample.pdf`)
+  - `engine`: `"llama-cloud"` (default, requires `LLAMA_CLOUD_API_KEY`) or `"docling"` (local, no API key required)
+  - `direct_response`: `false` by default. When set to `true`, returns the entire markdown text directly (intended for testing only, since responses can exceed MCP limits)
+- **Behavior**:
+  - Uses LlamaParse with automatic fallback to Docling
+  - Splits large PDFs into 40-page chunks before sending to LlamaParse
+  - Suppresses stdout/stderr while parsing to keep MCP JSON clean
+  - If `direct_response=false` (default), caches the markdown and returns metadata (cache ID, size, etc.)
+
+### `get_markdown_segment`
+
+- **Purpose**: Retrieve portions of cached markdown content emitted by `read_as_markdown`
+- **Parameters**:
+  - `cache_id`: ID returned by `read_as_markdown`
+  - `offset`: starting character index (default `0`)
+- **Behavior**:
+  - Returns 100,000-character segments to stay within MCP response limits
+  - Includes metadata about total length, next offset, and whether more content remains
+
+### `html_to_pdf`
+
+- **Purpose**: Convert HTML files (within the repo) into PDFs using Playwright Chromium
+- **Parameters**:
+  - `input_file_path`: Relative path to HTML file (e.g., `html/report.html`)
+  - `output_file_path`: Relative destination path for the PDF (e.g., `pdf/report.pdf`)
+- **Behavior**:
+  - Uses Playwright’s headless Chromium to render the HTML and save as PDF
+  - Automatically ensures the output directory exists
+
+### `download_sec_filing`
+
+- **Purpose**: Fetch SEC filings (10-K/10-Q/8-K/DEF 14A) for a given CIK and year
+- **Parameters**:
+  - `cik`: Company CIK (string or int)
+  - `year`: Year of filing (2021–2025)
+  - `filing_type`: `"8-K"`, `"10-Q"`, `"10-K"`, or `"DEF 14A"`
+  - `output_dir_path`: Directory (under `html/`) where the filing will be saved
+- **Behavior**:
+  - Uses SEC EDGAR endpoints with rate limiting
+  - Saves primary documents locally for subsequent conversion
+
+> **Tip**: Typically, you’ll call `download_sec_filing` first to get the PDF/HTML, then `read_as_markdown` to convert, and optionally `get_markdown_segment` if the content is large.
